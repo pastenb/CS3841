@@ -242,16 +242,19 @@ void* mymalloc_bf(int nbytes)
  */
 void myfree(void* ptr)
 {
-	struct block* b = malloc(sizeof(block));
-	b->start = ptr;
-	if (b->type == 0) // Already free
-	{
-		raise(SIGSEGV);
+	struct block *b = top;
+	while(b != NULL ) {
+		if (b->start == ptr) {
+			if (b->type == 0) {
+				raise(SIGSEGV);
+			} else {
+				b->type = 0;
+			}
+			return;
+		}
+		b = b->next;
 	}
-	else
-	{
-		b->type = 0;
-	}
+	raise(SIGSEGV);
 }
 
 /* get_allocated_space()
@@ -280,18 +283,13 @@ int get_allocated_space()
  */
 int get_remaining_space()
 {
-	struct block* b = malloc(sizeof(block));
-	b = top;
+	struct block* b = top;
 	int freeSpace = 0;
 	while (b->next != NULL)
 	{
 		if (b->type == 0)
 		{
 			freeSpace += b->size;
-			b = b->next;
-		}
-		else
-		{
 		}
 		b = b->next;
 	}
