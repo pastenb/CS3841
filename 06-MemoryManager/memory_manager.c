@@ -242,13 +242,18 @@ void* mymalloc_bf(int nbytes)
  */
 void myfree(void* ptr)
 {
+	printf("started\n");
 	struct block *b = top;
-	while(b != NULL ) {
+	while(b != NULL) {
 		if (b->start == ptr) {
-			if (b->type == 0) {
+			printf("found start ptr\n");
+			if(b->type == 0) {
 				raise(SIGSEGV);
+				printf("type = 0\n");
 			} else {
+				printf("type = 1\n");
 				b->type = 0;
+				printf("set type to 0\n");
 			}
 			return;
 		}
@@ -285,7 +290,7 @@ int get_remaining_space()
 {
 	struct block* b = top;
 	int freeSpace = 0;
-	while (b->next != NULL)
+	while (b != NULL)
 	{
 		if (b->type == 0)
 		{
