@@ -87,6 +87,8 @@ void* mymalloc_bf(int nbytes);
  */
 void myfree(void* ptr);
 
+void condense_free();
+
 /* get_allocated_space()
  *     Retrieve the current amount of space allocated by the memory manager (in bytes)
  *         Parameters: None
