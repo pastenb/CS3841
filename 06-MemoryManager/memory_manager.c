@@ -10,7 +10,6 @@
  * This can be used to simulate 'private' variables in c
  */
 static int allocation_count;
-static int fragment_count;
 
 pthread_mutex_t malloc_mutex;
 
@@ -43,7 +42,6 @@ void mmInit(void* start, int size)
 	top = b;
 	pthread_mutex_init(&malloc_mutex, NULL);
 	allocation_count = 0;
-	fragment_count = 1;
 }
 
 /* mmDestroy()
@@ -75,44 +73,27 @@ void mmDestroy()
 void* mymalloc_ff(int nbytes)
 {
 	pthread_mutex_lock(&malloc_mutex);
-	struct block* p = top;
-	while (p != NULL)
-	{
-		if (p->size >= nbytes && p->type == 0) // There is room for block and it is free space
-		{
-			break;
+	struct block *current = top;
+	while (current != NULL) {
+		if (current->type == 0 && current->size >= nbytes) {
+			// Found free block with enough space
+			current->type = 1;
+			allocation_count++;
+			// Check if we need to split the block
+			if(current->size != nbytes) {
+				// Splitthe block and create a new free block
+				struct block *new_block = malloc(sizeof(block));
+				new_block->start = current->start + nbytes;
+				new_block->size = current->size - nbytes;
+				new_block->type = 0;
+				new_block->next = current->next;
+				current->next = new_block;
+				current->size = nbytes;
+			}
+			pthread_mutex_unlock(&malloc_mutex);
+			return current->start;
 		}
-		p = p->next;
-	}
-	if (p == NULL) // There are no open blocks
-	{
-		pthread_mutex_unlock(&malloc_mutex);
-		return NULL;
-	}
-	else if (p->size == nbytes) // Open space is the exact size of bytes needed
-	{
-		p->type = 1;
-		pthread_mutex_unlock(&malloc_mutex);
-		allocation_count++;
-		return p->start;
-	}
-	else // Place bytes into open space
-	{
-		struct block* b = malloc(sizeof(block));
-		b->size = nbytes;
-		b->start = p->start;
-		b->type = 1;
-		b->next = p;
-
-		p->start = p->start + nbytes;
-		p->size = p->size - nbytes;
-		if (p == top)
-		{
-			top = b;
-		}
-		pthread_mutex_unlock(&malloc_mutex);
-		allocation_count++;
-		return b->start;
+		current = current->next;
 	}
 	pthread_mutex_unlock(&malloc_mutex);
 	return NULL;
@@ -129,48 +110,46 @@ void* mymalloc_ff(int nbytes)
 void* mymalloc_wf(int nbytes)
 {
 	pthread_mutex_lock(&malloc_mutex);
-	struct block* p = top;
-	while (p != NULL)
-	{
-		if (p->size >= nbytes && p->type == 0) // There is space and it is free
-		{
-			break;
-		}
-		p = p->next;
+
+	struct block* curr = top;
+	struct block* largest_block = NULL;
+	int largest_block_size = 0;
+	// Find the largest free block that can fit nbytes
+	if(get_fragment_count() == 1) {
+		largest_block = top;
+		curr = NULL;
 	}
-	if (p == NULL) // There are no open blocks
-	{
+
+	while (curr != NULL) {
+		if (curr->type == 0 && curr->size >= nbytes && curr->size > largest_block_size) {
+			largest_block = curr;
+			largest_block_size = curr->size;
+		}
+		curr = curr->next;
+	}
+	// If there's no free block large enough, return NULL
+	if (largest_block == NULL) {
 		pthread_mutex_unlock(&malloc_mutex);
 		return NULL;
 	}
-
-	else if (p->size > nbytes) // Larger than the space needed (Needed for worst fit)
-	{
+	// Allocate the block
+	void* start = largest_block->start;
+	int size = largest_block->size;
+	largest_block->type = 1;
+	allocation_count++;
+	// Update the size of the block if there's enough space for another block
+	if (size != nbytes) {
 		struct block* b = malloc(sizeof(block));
-		b->size = nbytes;
-		b->start = p->start;
-		b->type = 1;
-		b->next = p;
+		b->start = start + nbytes;
+		b->size = size - nbytes;
+		b->type = 0;
+		b->next = largest_block->next;
+		largest_block->size = nbytes;
+		largest_block->next = b;
+	}
 
-		p->start = p->start + nbytes;
-		p->size = p->size - nbytes;
-		if (p == top)
-		{
-			top = b;
-		}
-		pthread_mutex_unlock(&malloc_mutex);
-		allocation_count++;
-		return b->start;
-	}
-	else // The space needed is the same size as the space available
-	{
-		p->type = 1;
-		pthread_mutex_unlock(&malloc_mutex);
-		allocation_count++;
-		return p->start;
-	}
 	pthread_mutex_unlock(&malloc_mutex);
-	return NULL;
+	return start;
 }
 
 /* mymalloc_bf()
@@ -184,48 +163,46 @@ void* mymalloc_wf(int nbytes)
 void* mymalloc_bf(int nbytes)
 {
 	pthread_mutex_lock(&malloc_mutex);
-	struct block* p = top;
-	while (p != NULL)
-	{
-		if (p->size >= nbytes && p->type == 0) // There is space and it is free
-		{
-			break;
-		}
-		p = p->next;
+
+	struct block* curr = top;
+	struct block* smallest_block = NULL;
+	int smallest_block_size = 100;
+	// Find the largest free block that can fit nbytes
+	if(get_fragment_count() == 1) {
+		smallest_block = top;
+		curr = NULL;
 	}
-	if (p == NULL) // There are no open blocks
-	{
+
+	while (curr != NULL) {
+		if (curr->type == 0 && curr->size >= nbytes && curr->size < smallest_block_size) {
+			smallest_block = curr;
+			smallest_block_size = curr->size;
+		}
+		curr = curr->next;
+	}
+	// If there's no free block large enough, return NULL
+	if (smallest_block == NULL) {
 		pthread_mutex_unlock(&malloc_mutex);
 		return NULL;
 	}
-
-	else if (p->size == nbytes) // The free space is the same size as the space needed
-	{
-		p->type = 1;
-		pthread_mutex_unlock(&malloc_mutex);
-		allocation_count++;
-		return p->start;
-	}
-	else // The space free is greater than the needed space
-	{
+	// Allocate the block
+	void* start = smallest_block->start;
+	int size = smallest_block->size;
+	smallest_block->type = 1;
+	allocation_count++;
+	// Update the size of the block if there's enough space for another block
+	if (size != nbytes) {
 		struct block* b = malloc(sizeof(block));
-		b->size = nbytes;
-		b->start = p->start;
-		b->type = 1;
-		b->next = p;
-
-		p->start = p->start + nbytes;
-		p->size = p->size - nbytes;
-		if (p == top)
-		{
-			top = b;
-		}
-		pthread_mutex_unlock(&malloc_mutex);
-		allocation_count++;
-		return b->start;
+		b->start = start + nbytes;
+		b->size = size - nbytes;
+		b->type = 0;
+		b->next = smallest_block->next;
+		smallest_block->size = nbytes;
+		smallest_block->next = b;
 	}
+
 	pthread_mutex_unlock(&malloc_mutex);
-	return NULL;
+	return start;
 }
 
 /* myfree()
@@ -242,24 +219,34 @@ void* mymalloc_bf(int nbytes)
  */
 void myfree(void* ptr)
 {
-	printf("started\n");
 	struct block *b = top;
 	while(b != NULL) {
 		if (b->start == ptr) {
-			printf("found start ptr\n");
 			if(b->type == 0) {
 				raise(SIGSEGV);
-				printf("type = 0\n");
 			} else {
-				printf("type = 1\n");
 				b->type = 0;
-				printf("set type to 0\n");
 			}
+			condense_free();
 			return;
 		}
 		b = b->next;
 	}
 	raise(SIGSEGV);
+}
+
+void condense_free() {
+	struct block *curr = top;
+
+	while(curr != NULL && curr->next != NULL) {
+		if(curr->type == 0 && curr->next->type == 0) {
+			curr->size += curr->next->size;
+			curr->next = curr->next->next;
+			continue;
+		}
+
+		curr = curr->next;
+	}
 }
 
 /* get_allocated_space()
@@ -269,12 +256,13 @@ void myfree(void* ptr)
  */
 int get_allocated_space()
 {
-	struct block* b = malloc(sizeof(block));
-	b = top;
+	struct block* b = top;
 	int allocatedSpace = 0;
-	while (b->type == 1)
+	while (b != NULL)
 	{
-		allocatedSpace += b->size;
+		if(b->type == 1) {
+			allocatedSpace += b->size;
+		}
 		b = b->next;
 	}
 	return allocatedSpace;
@@ -308,7 +296,13 @@ int get_remaining_space()
  */
 int get_fragment_count()
 {
-	return fragment_count;
+	int count = 0;
+	struct block* c = top;
+	while(c != NULL) {
+		count++;
+		c = c->next;
+	}
+	return count;
 }
 
 /* get_mymalloc_count()
